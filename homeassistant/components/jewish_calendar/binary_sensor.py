@@ -1,77 +1,97 @@
 """Support for Jewish Calendar binary sensors."""
+
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 import datetime as dt
-from datetime import datetime
-from typing import cast
 
-import hdate
 from hdate.zmanim import Zmanim
 
 from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import event
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-import homeassistant.util.dt as dt_util
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
-from . import DOMAIN
+from .entity import JewishCalendarConfigEntry, JewishCalendarEntity
 
-BINARY_SENSORS = BinarySensorEntityDescription(
-    key="issur_melacha_in_effect",
-    name="Issur Melacha in Effect",
-    icon="mdi:power-plug-off",
+
+@dataclass(frozen=True)
+class JewishCalendarBinarySensorMixIns(BinarySensorEntityDescription):
+    """Binary Sensor description mixin class for Jewish Calendar."""
+
+    is_on: Callable[[Zmanim, dt.datetime], bool] = lambda _, __: False
+
+
+@dataclass(frozen=True)
+class JewishCalendarBinarySensorEntityDescription(
+    JewishCalendarBinarySensorMixIns, BinarySensorEntityDescription
+):
+    """Binary Sensor Entity description for Jewish Calendar."""
+
+
+BINARY_SENSORS: tuple[JewishCalendarBinarySensorEntityDescription, ...] = (
+    JewishCalendarBinarySensorEntityDescription(
+        key="issur_melacha_in_effect",
+        name="Issur Melacha in Effect",
+        icon="mdi:power-plug-off",
+        is_on=lambda state, now: bool(state.issur_melacha_in_effect(now)),
+    ),
+    JewishCalendarBinarySensorEntityDescription(
+        key="erev_shabbat_hag",
+        name="Erev Shabbat/Hag",
+        is_on=lambda state, now: bool(state.erev_shabbat_chag(now)),
+        entity_registry_enabled_default=False,
+    ),
+    JewishCalendarBinarySensorEntityDescription(
+        key="motzei_shabbat_hag",
+        name="Motzei Shabbat/Hag",
+        is_on=lambda state, now: bool(state.motzei_shabbat_chag(now)),
+        entity_registry_enabled_default=False,
+    ),
 )
 
 
-async def async_setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
-    async_add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
+    config_entry: JewishCalendarConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the Jewish Calendar binary sensor devices."""
-    if discovery_info is None:
-        return
+    """Set up the Jewish Calendar binary sensors."""
+    async_add_entities(
+        JewishCalendarBinarySensor(config_entry, description)
+        for description in BINARY_SENSORS
+    )
 
-    async_add_entities([JewishCalendarBinarySensor(hass.data[DOMAIN], BINARY_SENSORS)])
 
-
-class JewishCalendarBinarySensor(BinarySensorEntity):
+class JewishCalendarBinarySensor(JewishCalendarEntity, BinarySensorEntity):
     """Representation of an Jewish Calendar binary sensor."""
 
     _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _update_unsub: CALLBACK_TYPE | None = None
 
-    def __init__(
-        self,
-        data: dict[str, str | bool | int | float],
-        description: BinarySensorEntityDescription,
-    ) -> None:
-        """Initialize the binary sensor."""
-        self._attr_name = f"{data['name']} {description.name}"
-        self._attr_unique_id = f"{data['prefix']}_{description.key}"
-        self._location = data["location"]
-        self._hebrew = data["language"] == "hebrew"
-        self._candle_lighting_offset = data["candle_lighting_offset"]
-        self._havdalah_offset = data["havdalah_offset"]
-        self._update_unsub: CALLBACK_TYPE | None = None
+    entity_description: JewishCalendarBinarySensorEntityDescription
 
     @property
     def is_on(self) -> bool:
         """Return true if sensor is on."""
-        return cast(bool, self._get_zmanim().issur_melacha_in_effect)
+        zmanim = self._get_zmanim()
+        return self.entity_description.is_on(zmanim, dt_util.now())
 
     def _get_zmanim(self) -> Zmanim:
         """Return the Zmanim object for now()."""
-        return hdate.Zmanim(
-            date=dt_util.now(),
+        return Zmanim(
+            date=dt.date.today(),
             location=self._location,
             candle_lighting_offset=self._candle_lighting_offset,
             havdalah_offset=self._havdalah_offset,
-            hebrew=self._hebrew,
+            language=self._language,
         )
 
     async def async_added_to_hass(self) -> None:
@@ -79,8 +99,15 @@ class JewishCalendarBinarySensor(BinarySensorEntity):
         await super().async_added_to_hass()
         self._schedule_update()
 
+    async def async_will_remove_from_hass(self) -> None:
+        """Run when entity will be removed from hass."""
+        if self._update_unsub:
+            self._update_unsub()
+            self._update_unsub = None
+        return await super().async_will_remove_from_hass()
+
     @callback
-    def _update(self, now: datetime | None = None) -> None:
+    def _update(self, now: dt.datetime | None = None) -> None:
         """Update the state of the sensor."""
         self._update_unsub = None
         self._schedule_update()
@@ -90,7 +117,7 @@ class JewishCalendarBinarySensor(BinarySensorEntity):
         """Schedule the next update of the sensor."""
         now = dt_util.now()
         zmanim = self._get_zmanim()
-        update = zmanim.zmanim["sunrise"] + dt.timedelta(days=1)
+        update = zmanim.netz_hachama.local + dt.timedelta(days=1)
         candle_lighting = zmanim.candle_lighting
         if candle_lighting is not None and now < candle_lighting < update:
             update = candle_lighting

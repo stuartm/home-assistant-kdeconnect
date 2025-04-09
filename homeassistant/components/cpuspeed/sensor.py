@@ -1,13 +1,17 @@
 """Support for displaying the current CPU speed."""
+
 from __future__ import annotations
 
 from cpuinfo import cpuinfo
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import FREQUENCY_GIGAHERTZ
+from homeassistant.const import UnitOfFrequency
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+
+from .const import DOMAIN
 
 ATTR_BRAND = "brand"
 ATTR_HZ = "ghz_advertised"
@@ -20,7 +24,7 @@ HZ_ADVERTISED = "hz_advertised"
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the platform from config_entry."""
     async_add_entities([CPUSpeedSensor(entry)], True)
@@ -29,13 +33,18 @@ async def async_setup_entry(
 class CPUSpeedSensor(SensorEntity):
     """Representation of a CPU sensor."""
 
-    _attr_icon = "mdi:pulse"
-    _attr_name = "CPU Speed"
-    _attr_native_unit_of_measurement = FREQUENCY_GIGAHERTZ
+    _attr_device_class = SensorDeviceClass.FREQUENCY
+    _attr_has_entity_name = True
+    _attr_name = None
+    _attr_native_unit_of_measurement = UnitOfFrequency.GIGAHERTZ
 
     def __init__(self, entry: ConfigEntry) -> None:
         """Initialize the CPU sensor."""
         self._attr_unique_id = entry.entry_id
+        self._attr_device_info = DeviceInfo(
+            name="CPU Speed",
+            identifiers={(DOMAIN, entry.entry_id)},
+        )
 
     def update(self) -> None:
         """Get the latest data and updates the state."""

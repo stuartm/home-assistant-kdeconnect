@@ -1,33 +1,30 @@
 """Support for Overkiz sirens."""
+
 from typing import Any
 
 from pyoverkiz.enums import OverkizState
 from pyoverkiz.enums.command import OverkizCommand, OverkizCommandParam
 
-from homeassistant.components.siren import SirenEntity
-from homeassistant.components.siren.const import (
+from homeassistant.components.siren import (
     ATTR_DURATION,
-    SUPPORT_DURATION,
-    SUPPORT_TURN_OFF,
-    SUPPORT_TURN_ON,
+    SirenEntity,
+    SirenEntityFeature,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import HomeAssistantOverkizData
-from .const import DOMAIN
+from . import OverkizDataConfigEntry
 from .entity import OverkizEntity
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    entry: OverkizDataConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the Overkiz sirens from a config entry."""
-    data: HomeAssistantOverkizData = hass.data[DOMAIN][entry.entry_id]
+    data = entry.runtime_data
 
     async_add_entities(
         OverkizSiren(device.device_url, data.coordinator)
@@ -38,7 +35,11 @@ async def async_setup_entry(
 class OverkizSiren(OverkizEntity, SirenEntity):
     """Representation an Overkiz Siren."""
 
-    _attr_supported_features = SUPPORT_TURN_OFF | SUPPORT_TURN_ON | SUPPORT_DURATION
+    _attr_supported_features = (
+        SirenEntityFeature.TURN_OFF
+        | SirenEntityFeature.TURN_ON
+        | SirenEntityFeature.DURATION
+    )
 
     @property
     def is_on(self) -> bool:

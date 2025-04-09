@@ -1,4 +1,5 @@
 """Config flow for Pure Energie integration."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,11 +7,11 @@ from typing import Any
 from gridnet import Device, GridNet, GridNetConnectionError
 import voluptuous as vol
 
-from homeassistant.components import zeroconf
-from homeassistant.config_entries import ConfigFlow
+from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_HOST, CONF_NAME
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import TextSelector
+from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from .const import DOMAIN
 
@@ -24,7 +25,7 @@ class PureEnergieFlowHandler(ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle a flow initialized by the user."""
 
         errors = {}
@@ -50,15 +51,15 @@ class PureEnergieFlowHandler(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_HOST): str,
+                    vol.Required(CONF_HOST): TextSelector(),
                 }
             ),
             errors=errors or {},
         )
 
     async def async_step_zeroconf(
-        self, discovery_info: zeroconf.ZeroconfServiceInfo
-    ) -> FlowResult:
+        self, discovery_info: ZeroconfServiceInfo
+    ) -> ConfigFlowResult:
         """Handle zeroconf discovery."""
         self.discovered_host = discovery_info.host
         try:
@@ -82,7 +83,7 @@ class PureEnergieFlowHandler(ConfigFlow, domain=DOMAIN):
 
     async def async_step_zeroconf_confirm(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle a flow initiated by zeroconf."""
         if user_input is not None:
             return self.async_create_entry(

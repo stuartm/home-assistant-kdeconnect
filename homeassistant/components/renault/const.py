@@ -1,4 +1,5 @@
 """Constants for the Renault component."""
+
 from homeassistant.const import Platform
 
 DOMAIN = "renault"
@@ -6,7 +7,10 @@ DOMAIN = "renault"
 CONF_LOCALE = "locale"
 CONF_KAMEREON_ACCOUNT_ID = "kamereon_account_id"
 
-DEFAULT_SCAN_INTERVAL = 300  # 5 minutes
+DEFAULT_SCAN_INTERVAL = 420  # 7 minutes
+
+# If throttled time to pause the updates, in seconds
+COOLING_UPDATES_SECONDS = 60 * 15  # 15 minutes
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
@@ -15,7 +19,3 @@ PLATFORMS = [
     Platform.SELECT,
     Platform.SENSOR,
 ]
-
-DEVICE_CLASS_PLUG_STATE = "renault__plug_state"
-DEVICE_CLASS_CHARGE_STATE = "renault__charge_state"
-DEVICE_CLASS_CHARGE_MODE = "renault__charge_mode"

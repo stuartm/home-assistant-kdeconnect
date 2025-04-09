@@ -1,97 +1,52 @@
 """Support for Nanoleaf Lights."""
+
 from __future__ import annotations
 
-import logging
-import math
 from typing import Any
-
-from aionanoleaf import Nanoleaf
-import voluptuous as vol
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
-    ATTR_COLOR_TEMP,
+    ATTR_COLOR_TEMP_KELVIN,
     ATTR_EFFECT,
     ATTR_HS_COLOR,
     ATTR_TRANSITION,
-    PLATFORM_SCHEMA,
-    SUPPORT_BRIGHTNESS,
-    SUPPORT_COLOR,
-    SUPPORT_COLOR_TEMP,
-    SUPPORT_EFFECT,
-    SUPPORT_TRANSITION,
+    ColorMode,
     LightEntity,
+    LightEntityFeature,
 )
-from homeassistant.config_entries import SOURCE_IMPORT, ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_NAME, CONF_TOKEN
 from homeassistant.core import HomeAssistant
-import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-from homeassistant.util.color import (
-    color_temperature_kelvin_to_mired as kelvin_to_mired,
-    color_temperature_mired_to_kelvin as mired_to_kelvin,
-)
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import NanoleafEntryData
-from .const import DOMAIN
+from .coordinator import NanoleafConfigEntry, NanoleafCoordinator
 from .entity import NanoleafEntity
 
 RESERVED_EFFECTS = ("*Solid*", "*Static*", "*Dynamic*")
 DEFAULT_NAME = "Nanoleaf"
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_HOST): cv.string,
-        vol.Required(CONF_TOKEN): cv.string,
-        vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-    }
-)
-
-_LOGGER = logging.getLogger(__name__)
-
-
-async def async_setup_platform(
-    hass: HomeAssistant,
-    config: ConfigType,
-    async_add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
-) -> None:
-    """Import Nanoleaf light platform."""
-    _LOGGER.warning(
-        "Configuration of the Nanoleaf integration in YAML is deprecated and "
-        "will be removed in Home Assistant 2022.4; Your existing configuration "
-        "has been imported into the UI automatically and can be safely removed "
-        "from your configuration.yaml file"
-    )
-    hass.async_create_task(
-        hass.config_entries.flow.async_init(
-            DOMAIN,
-            context={"source": SOURCE_IMPORT},
-            data={CONF_HOST: config[CONF_HOST], CONF_TOKEN: config[CONF_TOKEN]},
-        )
-    )
-
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: NanoleafConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the Nanoleaf light."""
-    entry_data: NanoleafEntryData = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([NanoleafLight(entry_data.device, entry_data.coordinator)])
+    async_add_entities([NanoleafLight(entry.runtime_data)])
 
 
 class NanoleafLight(NanoleafEntity, LightEntity):
     """Representation of a Nanoleaf Light."""
 
-    def __init__(self, nanoleaf: Nanoleaf, coordinator: DataUpdateCoordinator) -> None:
+    _attr_supported_color_modes = {ColorMode.COLOR_TEMP, ColorMode.HS}
+    _attr_supported_features = LightEntityFeature.EFFECT | LightEntityFeature.TRANSITION
+    _attr_name = None
+    _attr_translation_key = "light"
+
+    def __init__(self, coordinator: NanoleafCoordinator) -> None:
         """Initialize the Nanoleaf light."""
-        super().__init__(nanoleaf, coordinator)
-        self._attr_unique_id = nanoleaf.serial_no
-        self._attr_name = nanoleaf.name
-        self._attr_min_mireds = math.ceil(1000000 / nanoleaf.color_temperature_max)
-        self._attr_max_mireds = kelvin_to_mired(nanoleaf.color_temperature_min)
+        super().__init__(coordinator)
+        self._attr_unique_id = self._nanoleaf.serial_no
+        self._attr_max_color_temp_kelvin = self._nanoleaf.color_temperature_max
+        self._attr_min_color_temp_kelvin = self._nanoleaf.color_temperature_min
 
     @property
     def brightness(self) -> int:
@@ -99,9 +54,9 @@ class NanoleafLight(NanoleafEntity, LightEntity):
         return int(self._nanoleaf.brightness * 2.55)
 
     @property
-    def color_temp(self) -> int:
-        """Return the current color temperature."""
-        return kelvin_to_mired(self._nanoleaf.color_temperature)
+    def color_temp_kelvin(self) -> int | None:
+        """Return the color temperature value in Kelvin."""
+        return self._nanoleaf.color_temperature
 
     @property
     def effect(self) -> str | None:
@@ -120,11 +75,6 @@ class NanoleafLight(NanoleafEntity, LightEntity):
         return self._nanoleaf.effects_list
 
     @property
-    def icon(self) -> str:
-        """Return the icon to use in the frontend, if any."""
-        return "mdi:triangle-outline"
-
-    @property
     def is_on(self) -> bool:
         """Return true if light is on."""
         return self._nanoleaf.is_on
@@ -135,21 +85,20 @@ class NanoleafLight(NanoleafEntity, LightEntity):
         return self._nanoleaf.hue, self._nanoleaf.saturation
 
     @property
-    def supported_features(self) -> int:
-        """Flag supported features."""
-        return (
-            SUPPORT_BRIGHTNESS
-            | SUPPORT_COLOR_TEMP
-            | SUPPORT_EFFECT
-            | SUPPORT_COLOR
-            | SUPPORT_TRANSITION
-        )
+    def color_mode(self) -> ColorMode | None:
+        """Return the color mode of the light."""
+        # According to API docs, color mode is "ct", "effect" or "hs"
+        # https://forum.nanoleaf.me/docs/openapi#_4qgqrz96f44d
+        if self._nanoleaf.color_mode == "ct":
+            return ColorMode.COLOR_TEMP
+        # Home Assistant does not have an "effect" color mode, just report hs
+        return ColorMode.HS
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Instruct the light to turn on."""
         brightness = kwargs.get(ATTR_BRIGHTNESS)
         hs_color = kwargs.get(ATTR_HS_COLOR)
-        color_temp_mired = kwargs.get(ATTR_COLOR_TEMP)
+        color_temp_kelvin = kwargs.get(ATTR_COLOR_TEMP_KELVIN)
         effect = kwargs.get(ATTR_EFFECT)
         transition = kwargs.get(ATTR_TRANSITION)
 
@@ -163,10 +112,8 @@ class NanoleafLight(NanoleafEntity, LightEntity):
             hue, saturation = hs_color
             await self._nanoleaf.set_hue(int(hue))
             await self._nanoleaf.set_saturation(int(saturation))
-        elif color_temp_mired:
-            await self._nanoleaf.set_color_temperature(
-                mired_to_kelvin(color_temp_mired)
-            )
+        elif color_temp_kelvin:
+            await self._nanoleaf.set_color_temperature(color_temp_kelvin)
         if transition:
             if brightness:  # tune to the required brightness in n seconds
                 await self._nanoleaf.set_brightness(
